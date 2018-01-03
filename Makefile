@@ -77,6 +77,7 @@ TARGET1 = optimization.exe
 TARGET2 = benchmark.exe
 TARGET3 = sampling.exe
 TARGET4 = sensitivity.exe
+TEST = test.exe
 
 # Directories
 SRCDIR = src
@@ -105,6 +106,10 @@ OBJS4 = $(OBJDIR)/forlab.o \
 				$(OBJDIR)/stochoptim.o \
         $(OBJDIR)/sensitivity.o
 
+OBJST = $(OBJDIR)/forlab.o \
+				$(OBJDIR)/stochoptim.o \
+				$(OBJDIR)/test.o
+
 # These routines depend on include file - recompile if include modified
 ALL = $(TARGET1) $(TARGET2) $(TARGET3) $(TARGET4)
 all: $(ALL)
@@ -112,6 +117,7 @@ optimization: $(TARGET1)
 benchmark: $(TARGET2)
 sampling: $(TARGET3)
 sensitivity: $(TARGET4)
+test: $(TEST)
 
 
 # ======================================================================
@@ -119,6 +125,7 @@ sensitivity: $(TARGET4)
 # General rules for building ".o" objects from fortran programs or subroutines
 # ======================================================================
 vpath %.o obj
+vpath %.mod obj
 vpath %.f90 $(LIBDIR) $(TSTDIR)
 COMPILE = $(FC) $(FFLAGS) $(OMP) $(MPI_INC) $(MPI_LIB)
 
@@ -140,11 +147,14 @@ $(TARGET3): $(OBJS3)
 $(TARGET4): $(OBJS4)
 	$(COMPILE) -o $@ $(OBJS4)
 
+$(TEST): $(OBJST)
+	$(COMPILE) -o $@ $(OBJST)
+
 # Utilities
-.PHONY: all clean veryclean
+.PHONY: $(ALL) test clean veryclean
 
 clean:
-	rm -rf $(ALL) $(OBJDIR)
+	rm -rf $(ALL) $(TEST) $(OBJDIR)
 
 veryclean:
-	rm -rf $(TARGET1)* $(TARGET2)* $(TARGET3)* $(TARGET4)* $(OBJDIR) output *.optrpt
+	rm -rf $(TARGET1)* $(TARGET2)* $(TARGET3)* $(TARGET4)* $(TEST)* $(OBJDIR) output *.optrpt
