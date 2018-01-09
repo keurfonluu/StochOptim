@@ -3,7 +3,7 @@ StochOptim provides user friendly functions to solve optimization problems using
 
 | | |  
 |:-:|---|
-| **Version:** | 1.0.0 |
+| **Version:** | 1.0.1 |
 | **Author:** | Keurfon Luu |
 | **Web site:** | https://github.com/keurfonluu/stochoptim |
 | **Copyright:** | This document has been placed in the public domain. |

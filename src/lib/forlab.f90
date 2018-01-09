@@ -28,7 +28,7 @@ module forlab
 !=======================================================================
 
   integer, public, parameter :: IPRE = 4
-  integer, public, parameter :: RPRE = 8
+  integer, public, parameter :: RPRE = 4
   integer, public, parameter :: CLEN = 512
   real(kind = 8), public, parameter :: pi = 3.141592653589793238460d0
   real(kind = 8), public, save :: tic_time
@@ -50,7 +50,7 @@ module forlab
     randi, randperm, repmat, rms, savetxt, savebin, sind, sort, solve, &
     svd, svdsolve, std, spline1, spline2, skewness, signum, sinc, &
     split_argument, tand, tic, toc, trace, tril, triu, utm2deg, vertcat, &
-    var, zeros
+    var, zeros, dbindex, gmm, kmeans, mbkmeans, silhouette
 #ifdef do_mpi
   public :: mpi_rpre
 #endif
@@ -219,6 +219,13 @@ module forlab
   end interface datevec
 
   !---------------------------------------------------------------------
+  ! Function dbindex
+  !---------------------------------------------------------------------
+  interface dbindex
+    module procedure dbindex1, dbindex2
+  end interface dbindex
+
+  !---------------------------------------------------------------------
   ! Function deg2utm
   !---------------------------------------------------------------------
   interface deg2utm
@@ -291,6 +298,13 @@ module forlab
   end interface gammainc
 
   !---------------------------------------------------------------------
+  ! Function gmm
+  !---------------------------------------------------------------------
+  interface gmm
+    module procedure gmm1, gmm2
+  end interface gmm
+
+  !---------------------------------------------------------------------
   ! Function horzcat
   !---------------------------------------------------------------------
   interface horzcat
@@ -337,6 +351,13 @@ module forlab
   end interface kde
 
   !---------------------------------------------------------------------
+  ! Function kmeans
+  !---------------------------------------------------------------------
+  interface kmeans
+    module procedure kmeans1, kmeans2
+  end interface kmeans
+
+  !---------------------------------------------------------------------
   ! Function kurtosis
   !---------------------------------------------------------------------
   interface kurtosis
@@ -378,6 +399,13 @@ module forlab
   interface mad
     module procedure mad1, mad2
   end interface mad
+
+  !---------------------------------------------------------------------
+  ! Function mbkmeans
+  !---------------------------------------------------------------------
+  interface mbkmeans
+    module procedure mbkmeans1, mbkmeans2
+  end interface mbkmeans
 
   !---------------------------------------------------------------------
   ! Function median
@@ -507,6 +535,13 @@ module forlab
   interface sinc
     module procedure sinc0, sinc1
   end interface sinc
+
+  !---------------------------------------------------------------------
+  ! Function silhouette
+  !---------------------------------------------------------------------
+  interface silhouette
+    module procedure silhouette1, silhouette2
+  end interface silhouette
 
   !---------------------------------------------------------------------
   ! Function sind
@@ -2203,6 +2238,122 @@ contains
   end function datevec0
 
 !=======================================================================
+! dbindex
+!-----------------------------------------------------------------------
+! dbindex computes the Davies-Bouldin index for evaluating clutering
+! algorithms.
+!
+! Syntax
+!-----------------------------------------------------------------------
+! db = dbindex(x, cluster, means)
+! db = dbindex(x, cluster, means, p, q)
+! db = dbindex(X, cluster, means)
+! db = dbindex(X, cluster, means, p, q)
+!
+! Description
+!-----------------------------------------------------------------------
+! db = dbindex(x, cluster, means) returns the Davies-Bouldin index using
+! the Euclidian distance.
+!
+! db = dbindex(x, cluster, means, p, q) returns the Davies-Bouldin index
+! using the metric defined by p and q.
+!
+! db = dbindex(X, cluster, means) returns the Davies-Bouldin index using
+! the Euclidian distance, each row of array X being an observation and
+! each column a parameter.
+!
+! db = dbindex(X, cluster, means, p, q) returns the Davies-Bouldin index
+! using the metric defined by p and q, each row of array X being an
+! observation and each column a parameter.
+!
+! Notes
+!-----------------------------------------------------------------------
+! After Davies D. L. and Bouldin D. W. (1979): "A Cluster Separation
+! Measure".
+!=======================================================================
+
+  real(kind = RPRE) function dbindex1(x, cluster, means, p, q) result(db)
+    real(kind = RPRE), dimension(:), intent(in) :: x, means
+    integer(kind = IPRE), dimension(:), intent(in) :: cluster
+    real(kind = RPRE), intent(in), optional :: p, q
+    integer(kind = IPRE) :: K, n
+    real(kind = RPRE) :: opt_p, opt_q
+    real(kind = RPRE), dimension(:,:), allocatable :: A, mu
+
+    K = size(means)
+    if ( K .eq. 1 ) then
+      print *, "Warning: in dbindex, the Davies-Bouldin index cannot " &
+        // "be defined for K = 1."
+      db = 1.0d0
+      return
+    end if
+
+    opt_p = 2.
+    opt_q = 2.
+    if (present(p)) opt_p = p
+    if (present(q)) opt_q = q
+
+    n = size(x)
+    A = reshape( x, shape = [ n, 1 ], order = [ 1, 2 ] )
+    mu = reshape( x, shape = [ K, 1 ], order = [ 1, 2 ] )
+    db = dbindex2(A, cluster, mu, opt_p, opt_q)
+    return
+  end function dbindex1
+
+  real(kind = RPRE) function dbindex2(X, cluster, means, p, q) result(db)
+    real(kind = RPRE), dimension(:,:), intent(in) :: X
+    integer(kind = IPRE), dimension(:), intent(in) :: cluster
+    real(kind = RPRE), dimension(:,:), intent(in) :: means
+    real(kind = RPRE), intent(in), optional :: p, q
+    integer(kind = IPRE) :: i, j, K
+    real(kind = RPRE) :: opt_p, opt_q, Mij
+    integer(kind = IPRE), dimension(:), allocatable :: idx
+    real(kind = RPRE), dimension(:), allocatable :: S
+    real(kind = RPRE), dimension(:,:), allocatable :: R
+
+    K = size(means, 1)
+    if ( K .eq. 1 ) then
+      print *, "Warning: in dbindex, the Davies-Bouldin index cannot " &
+        // "be defined for K = 1."
+      db = 1.0d0
+      return
+    end if
+
+    opt_p = 2.
+    opt_q = 2.
+    if (present(p)) opt_p = p
+    if (present(q)) opt_q = q
+
+    ! Measure the scattering within each cluster
+    !============================================
+    S = zeros(K)
+    do i = 1, K
+      idx = find( cluster .eq. i )
+      do j = 1, size(idx)
+        S(i) = S(i) + norm(X(idx(j),:) - means(i,:), opt_q)**2
+      end do
+      S(i) = sqrt( S(i) / real(size(idx), RPRE) )
+    end do
+
+    ! Measure the similarity function R between each cluster
+    !========================================================
+    R = zeros(K, K)
+    do i = 1, K-1
+      do j = i+1, K
+        Mij = norm(means(i,:) - means(j,:), opt_p)  ! Distance between clusters i and j
+        R(i,j) = ( S(i) + S(j) ) / Mij
+        R(j,i) = R(i,j)
+      end do
+    end do
+
+    ! Compute the Davies-Bouldin index
+    !==================================
+    db = mean( [ ( maxval(R(i,:)), i = 1, K ) ] )
+
+    return
+  end function dbindex2
+
+!=======================================================================
 ! deboor
 !-----------------------------------------------------------------------
 ! deboor evaluates recursively the spline polynomial basis using
@@ -3558,6 +3709,201 @@ contains
   end function
 
 !=======================================================================
+! gmm
+!-----------------------------------------------------------------------
+! gmm performs Gaussian Mixture Modelling using Expectation-Maximization
+! algorithm.
+!
+! Syntax
+!-----------------------------------------------------------------------
+! idx = gmm(x, K, [options = ])
+! idx = gmm(A, K, [options = ])
+!
+! Description
+!-----------------------------------------------------------------------
+! idx = gmm(x, K, [options = ]) returns the cluster indices of each
+! element in vector x.
+!
+! idx = gmm(A, K, [options = ]) returns the cluster indices of each
+! rows in matrix A.
+!
+! Options
+!-----------------------------------------------------------------------
+! means               Output centroids
+! stdev / covar       Output standard deviation / covariance matrix
+! prob                Output probabilities
+! itermax = 1000      Maximum number of iterations
+! niter               Output number of iterations
+!=======================================================================
+
+  function gmm1(x, K, means, stdev, prob, itermax, niter) result(idx)
+    integer(kind = IPRE), dimension(:), allocatable :: idx
+    real(kind = RPRE), dimension(:), intent(in) :: x
+    integer(kind = IPRE), intent(in) :: K
+    real(kind = RPRE), dimension(:), allocatable, intent(inout), optional :: prob, means, stdev
+    integer(kind = IPRE), intent(in), optional :: itermax
+    integer(kind = IPRE), intent(inout), optional :: niter
+    integer(kind = IPRE) :: opt_itermax, i, j, n, iter
+    real(kind = RPRE), dimension(:), allocatable :: phi, mu, mu_prev, sigma
+    real(kind = RPRE), dimension(:,:), allocatable :: w, pdf, pdf_w
+
+    n = size(x)
+
+    opt_itermax = 1000
+    if (present(itermax)) opt_itermax = itermax
+
+    ! Initialization
+    !================
+    phi = ones(K) / real(K)     ! Equal initial probabilities for each cluster
+    mu = x(randperm(n, K))      ! Random initial means
+    sigma = ones(K) * std(x)    ! Covariance matrices for each variable
+
+    ! Loop until convergence
+    !========================
+    w = zeros(n, K)
+    iter = 0
+    do while ( iter .lt. opt_itermax )
+      iter = iter + 1
+
+      ! Expectation
+      !=============
+      pdf = zeros(n, K)
+      do j = 1, K
+        pdf(:,j) = normpdf(x, mu(j), sigma(j))
+      end do
+
+      pdf_w = pdf * repmat(phi, n, 2)
+      w = pdf_w / repmat(sum(pdf_w, dim = 2), K)
+
+      ! Maximization
+      !==============
+      mu_prev = mu
+      do j = 1, K
+        phi(j) = mean(w(:,j))
+        mu(j) = dot_product(w(:,j), x) / sum(w(:,j))
+        sigma(j) = dot_product(w(:,j), (x - mu(j))**2) / sum(w(:,j))
+        sigma(j) = sqrt(sigma(j))
+      end do
+
+      if ( norm(mu - mu_prev) .lt. 1.0d-10 ) exit
+    end do
+
+    idx = zeros(n)
+    do i = 1, n
+      idx(i:i) = maxloc(pdf(i,:))
+    end do
+
+    if (present(niter)) niter = iter
+    if (present(means)) means = mu
+    if (present(stdev)) stdev = sigma
+    if (present(prob)) prob = phi
+
+    return
+  end function gmm1
+
+  function gmm2(A, K, means, covar, prob, itermax, niter) result(idx)
+    integer(kind = IPRE), dimension(:), allocatable :: idx
+    real(kind = RPRE), dimension(:,:), intent(in) :: A
+    integer(kind = IPRE), intent(in) :: K
+    real(kind = RPRE), dimension(:), allocatable, intent(inout), optional :: prob
+    real(kind = RPRE), dimension(:,:), allocatable, intent(inout), optional :: means
+    real(kind = RPRE), dimension(:,:,:), allocatable, intent(inout), optional :: covar
+    integer(kind = IPRE), intent(in), optional :: itermax
+    integer(kind = IPRE), intent(inout), optional :: niter
+
+    integer(kind = IPRE) :: opt_itermax, i, j, n, p, iter
+    real(kind = RPRE), dimension(:), allocatable :: phi
+    real(kind = RPRE), dimension(:,:), allocatable :: mu, mu_prev, w, pdf, &
+      pdf_w, tmp
+    real(kind = RPRE), dimension(:,:,:), allocatable :: sigma
+
+    n = size(A, 1)
+    p = size(A, 2)
+
+    opt_itermax = 1000
+    if (present(itermax)) opt_itermax = itermax
+
+    ! Initialization
+    !================
+    phi = ones(K) / real(K)     ! Equal initial probabilities for each cluster
+    mu = A(randperm(n, K),:)    ! Random initial means
+    sigma = zeros(p, p, K)      ! Covariance matrices for each variable
+
+    tmp = cov(A)
+    do j = 1, K
+      sigma(:,:,j) = tmp
+    end do
+
+    ! Loop until convergence
+    !========================
+    w = zeros(n, K)
+    iter = 0
+    do while ( iter .lt. opt_itermax )
+      iter = iter + 1
+
+      ! Expectation
+      !=============
+      pdf = zeros(n, K)
+      do j = 1, K
+        pdf(:,j) = normpdf(A, mu(j,:), sigma(:,:,j))
+      end do
+
+      pdf_w = pdf * repmat(phi, n, 2)
+      w = pdf_w / repmat(sum(pdf_w, dim = 2), K)
+
+      ! Maximization
+      !==============
+      mu_prev = mu
+      do j = 1, K
+        phi(j) = mean(w(:,j))
+        mu(j,:) = matmul(w(:,j), A) / sum(w(:,j))
+        tmp = A - repmat(mu(j,:), n, 2)
+
+        sigma(:,:,j) = zeros(p, p)
+        do i = 1, n
+          sigma(:,:,j) = sigma(:,:,j) &
+                         + w(i,j) * matmul(transpose(tmp(i:i,:)), tmp(i:i,:)) &
+                                  / sum(w(:,j))
+        end do
+      end do
+
+      if ( means_residuals(mu, mu_prev) .lt. 1.0d-10 ) exit
+    end do
+
+    idx = zeros(n)
+    do i = 1, n
+      idx(i:i) = maxloc(pdf(i,:))
+    end do
+
+    if (present(niter)) niter = iter
+    if (present(means)) means = mu
+    if (present(covar)) covar = sigma
+    if (present(prob)) prob = phi
+
+    return
+  contains
+
+    !-------------------------------------------------------------------
+    ! means_residuals
+    !-------------------------------------------------------------------
+    function means_residuals(means1, means2) result(eps)
+      real(kind = RPRE) :: eps
+      real(kind = RPRE), dimension(:,:), intent(in) :: means1, means2
+      real(kind = RPRE), dimension(:,:), allocatable :: means
+      integer(kind = IPRE) :: k
+
+      eps = 0.0d0
+      means = abs( means2 - means1 )
+      do k = 1, p
+        eps = eps + sum(means(:,k))**2
+      end do
+      eps = sqrt(eps)
+      return
+    end function means_residuals
+
+  end function gmm2
+
+!=======================================================================
 ! horzcat
 !-----------------------------------------------------------------------
 ! horzcat concatenates arrays horizontally.
@@ -3862,7 +4208,7 @@ contains
 
     m = size(xq, 1)
     n = size(xq, 2)
-    vq = reshape( interp2_1(x, y, v, [ xq ], [ yq ]), shape = [ m, n ] )
+    vq = reshape( interp2_1(y, x, v, [ yq ], [ xq ]), shape = [ m, n ] )
     return
   end function interp2_2
 
@@ -5155,6 +5501,169 @@ contains
   end subroutine lu
 
 !=======================================================================
+! kmeans
+!-----------------------------------------------------------------------
+! kmeans performs K-means clustering.
+!
+! Syntax
+!-----------------------------------------------------------------------
+! idx = kmeans(x, K, [options = ])
+! idx = kmeans(A, K, [options = ])
+!
+! Description
+!-----------------------------------------------------------------------
+! idx = kmeans(x, K, [options = ]) returns the cluster indices of each
+! element in vector x.
+!
+! idx = kmeans(A, K, [options = ]) returns the cluster indices of each
+! rows in matrix A.
+!
+! Options
+!-----------------------------------------------------------------------
+! means               Output centroids
+! init                Initial centroids
+! itermax = 1000      Maximum number of iterations
+! niter               Output number of iterations
+!
+! Notes
+!-----------------------------------------------------------------------
+! By default, initials centroids are randomly chosen among data points.
+!=======================================================================
+
+  function kmeans1(x, K, means, init, itermax, niter) result(idx)
+    integer(kind = IPRE), dimension(:), allocatable :: idx
+    real(kind = RPRE), dimension(:), intent(in) :: x
+    integer(kind = IPRE), intent(in) :: K
+    real(kind = RPRE), dimension(:), intent(in), optional :: init
+    real(kind = RPRE), dimension(:), allocatable, intent(inout), optional :: means
+    integer(kind = IPRE), intent(in), optional :: itermax
+    integer(kind = IPRE), intent(inout), optional :: niter
+    integer(kind = IPRE) :: opt_itermax, n, iter
+    real(kind = RPRE), dimension(:,:), allocatable :: m1
+    real(kind = RPRE), dimension(:,:), allocatable :: opt_init, A
+
+    n = size(x)
+
+    opt_itermax = 100
+    if (present(itermax)) opt_itermax = itermax
+    if (present(init)) then
+      opt_init = reshape( init, shape = [ K, 1 ], order = [ 1, 2 ])
+    else
+      opt_init = reshape( x(randperm(n, K)), shape = [ K, 1 ], order = [ 1, 2 ])
+    end if
+
+    A = reshape( x, shape = [ n, 1 ], order = [ 1, 2 ] )
+    idx = kmeans2(A, K, m1, opt_init, opt_itermax, iter)
+
+    if (present(niter)) niter = iter
+    if (present(means)) means = [ m1 ]
+
+    return
+  end function kmeans1
+
+  function kmeans2(A, K, means, init, itermax, niter) result(idx)
+    integer(kind = IPRE), dimension(:), allocatable :: idx
+    real(kind = RPRE), dimension(:,:), intent(in) :: A
+    integer(kind = IPRE), intent(in) :: K
+    real(kind = RPRE), dimension(:,:), intent(in), optional :: init
+    real(kind = RPRE), dimension(:,:), allocatable, intent(inout), optional :: means
+    integer(kind = IPRE), intent(in), optional :: itermax
+    integer(kind = IPRE), intent(inout), optional :: niter
+    integer(kind = IPRE) :: opt_itermax, i, n, p, iter
+    real(kind = RPRE), dimension(:,:), allocatable :: opt_init, m, m1
+
+    n = size(A, 1)
+    p = size(A, 2)
+
+    opt_itermax = 1000
+    if (present(itermax)) opt_itermax = itermax
+    if (present(init)) then
+      opt_init = init
+    else
+      opt_init = A(randperm(n, K),:)
+    end if
+
+    ! Initialization
+    !================
+    m = opt_init
+    idx = update_index(A, m)
+    m1 = update_means(A, idx)
+
+    ! Loop until convergence
+    !========================
+    iter = 0
+    do while ( ( means_residuals(m, m1) .gt. 1.0d-10 ) &
+               .and. ( iter .lt. opt_itermax ) )
+      iter = iter + 1
+      m = m1
+      idx = update_index(A, m)
+      m1 = update_means(A, idx)
+    end do
+
+    if (present(niter)) niter = iter
+    if (present(means)) means = m1
+
+    return
+  contains
+
+    !-------------------------------------------------------------------
+    ! update_index
+    !-------------------------------------------------------------------
+    function update_index(A, means) result(idx)
+      integer(kind = IPRE), dimension(:), allocatable :: idx
+      real(kind = RPRE), dimension(:,:), intent(in) :: A, means
+      integer(kind = IPRE) :: i, j, b(1)
+      real(kind = RPRE), dimension(:), allocatable :: dist
+
+      idx = zeros(n)
+      do i = 1, n
+        dist = zeros(K)
+        do j = 1, K
+          dist(j) = norm(A(i,:) - means(j,:))
+        end do
+        b = minloc(dist)
+        idx(i) = b(1)
+      end do
+      return
+    end function update_index
+
+    !-------------------------------------------------------------------
+    ! update_means
+    !-------------------------------------------------------------------
+    function update_means(A, idx) result(means)
+      real(kind = RPRE), dimension(:,:), allocatable :: means
+      real(kind = RPRE), dimension(:,:), intent(in) :: A
+      integer(kind = IPRE), dimension(:), intent(in) :: idx
+      integer(kind = IPRE) :: j
+
+      means = zeros(K, p)
+      do j = 1, K
+        means(j,:) = mean(A(find(idx .eq. j),:))
+      end do
+      return
+    end function update_means
+
+    !-------------------------------------------------------------------
+    ! means_residuals
+    !-------------------------------------------------------------------
+    function means_residuals(means1, means2) result(eps)
+      real(kind = RPRE) :: eps
+      real(kind = RPRE), dimension(:,:), intent(in) :: means1, means2
+      real(kind = RPRE), dimension(:,:), allocatable :: means
+      integer(kind = IPRE) :: k
+
+      eps = 0.0d0
+      means = abs( means2 - means1 )
+      do k = 1, p
+        eps = eps + sum(means(:,k))**2
+      end do
+      eps = sqrt(eps)
+      return
+    end function means_residuals
+
+  end function kmeans2
+
+!=======================================================================
 ! mad
 !-----------------------------------------------------------------------
 ! mad computes the mean-absolute-deviation or the median-absolute
@@ -5239,6 +5748,183 @@ contains
     end if
     return
   end function mad2
+
+!=======================================================================
+! mbkmeans
+!-----------------------------------------------------------------------
+! mbkmeans performs Mini-batch K-means clustering.
+!
+! Syntax
+!-----------------------------------------------------------------------
+! idx = mbkmeans(x, K, [options = ])
+! idx = mbkmeans(A, K, [options = ])
+!
+! Description
+!-----------------------------------------------------------------------
+! idx = mbkmeans(x, K, [options = ]) returns the cluster indices of each
+! element in vector x.
+!
+! idx = mbkmeans(A, K, [options = ]) returns the cluster indices of each
+! rows in matrix A.
+!
+! Options
+!-----------------------------------------------------------------------
+! perc = 0.2          Size of the batch (percentage)
+! means               Output centroids
+! init                Initial centroids
+! itermax = 50        Maximum number of iterations
+! niter               Output number of iterations
+!=======================================================================
+
+  function mbkmeans1(x, K, perc, means, init, itermax, niter) result(idx)
+    integer(kind = IPRE), dimension(:), allocatable :: idx
+    real(kind = RPRE), dimension(:), intent(in) :: x
+    integer(kind = IPRE), intent(in) :: K
+    real(kind = RPRE), intent(in), optional :: perc
+    real(kind = RPRE), dimension(:), intent(in), optional :: init
+    real(kind = RPRE), dimension(:), allocatable, intent(inout), optional :: means
+    integer(kind = IPRE), intent(in), optional :: itermax
+    integer(kind = IPRE), intent(inout), optional :: niter
+    integer(kind = IPRE) :: opt_itermax, n, iter
+    real(kind = RPRE) :: opt_perc
+    real(kind = RPRE), dimension(:,:), allocatable :: m1
+    real(kind = RPRE), dimension(:,:), allocatable :: opt_init, A
+
+    n = size(x)
+
+    opt_itermax = 50
+    opt_perc = 0.2d0
+    if (present(itermax)) opt_itermax = itermax
+    if (present(perc)) opt_perc = perc
+    if (present(init)) then
+      opt_init = reshape( init, shape = [ K, 1 ], order = [ 1, 2 ])
+    else
+      opt_init = reshape( x(randperm(n, K)), shape = [ K, 1 ], order = [ 1, 2 ])
+    end if
+
+    A = reshape( x, shape = [ n, 1 ], order = [ 1, 2 ] )
+    idx = mbkmeans2(A, K, perc, m1, opt_init, opt_itermax, iter)
+
+    if (present(niter)) niter = iter
+    if (present(means)) means = [ m1 ]
+
+    return
+  end function mbkmeans1
+
+  function mbkmeans2(A, K, perc, means, init, itermax, niter) result(idx)
+    integer(kind = IPRE), dimension(:), allocatable :: idx
+    real(kind = RPRE), dimension(:,:), intent(in) :: A
+    integer(kind = IPRE), intent(in) :: K
+    real(kind = RPRE), intent(in), optional :: perc
+    real(kind = RPRE), dimension(:,:), intent(in), optional :: init
+    real(kind = RPRE), dimension(:,:), allocatable, intent(inout), optional :: means
+    integer(kind = IPRE), intent(in), optional :: itermax
+    integer(kind = IPRE), intent(inout), optional :: niter
+    integer(kind = IPRE) :: opt_itermax, n, p, bs, iter
+    real(kind = RPRE) :: opt_perc
+    integer(kind = IPRE), dimension(:), allocatable :: v
+    real(kind = RPRE), dimension(:,:), allocatable :: opt_init, m, m1, B
+
+    n = size(A, 1)
+    p = size(A, 2)
+
+    opt_itermax = 50
+    opt_perc = 0.2d0
+    if (present(itermax)) opt_itermax = itermax
+    if (present(perc)) opt_perc = perc
+    if (present(init)) then
+      opt_init = init
+    else
+      opt_init = A(randperm(n, K),:)
+    end if
+
+    ! Initialization
+    !================
+    bs = nint(opt_perc*n)   ! Batch size
+    m = opt_init            ! Initial centroids
+    v = zeros(K)            ! Per-center counter
+
+    ! Iterate until convergence
+    !===========================
+    do iter = 1, opt_itermax
+      B = A(randperm(n, bs),:)        ! Batch
+      m1 = m                          ! Previous means
+      idx = cache_means(B, m)         ! Cache means
+      call update_means(m, v, B, idx) ! Update means with gradient
+      if ( means_residuals(m, m1) .lt. 1.0d-2 ) exit
+    end do
+
+    idx = cache_means(A, m)
+
+    if (present(niter)) niter = iter - 1
+    if (present(means)) means = m
+
+    return
+  contains
+
+    !-------------------------------------------------------------------
+    ! cache_means
+    !-------------------------------------------------------------------
+    function cache_means(A, means) result(idx)
+      integer(kind = IPRE), dimension(:), allocatable :: idx
+      real(kind = RPRE), dimension(:,:), intent(in) :: A, means
+      integer(kind = IPRE) :: i, j, n, b(1)
+      real(kind = RPRE), dimension(:), allocatable :: dist
+
+      n = size(A, 1)
+      idx = zeros(n)
+      dist = zeros(K)
+      do i = 1, n
+        dist = 0.0d0
+        do j = 1, K
+          dist(j) = norm(A(i,:) - means(j,:))
+        end do
+        b = minloc(dist)
+        idx(i) = b(1)
+      end do
+      return
+    end function cache_means
+
+    !-------------------------------------------------------------------
+    ! update_means
+    !-------------------------------------------------------------------
+    subroutine update_means(means, v, A, idx)
+      real(kind = RPRE), dimension(:,:), intent(inout) :: means
+      integer(kind = IPRE), dimension(:), intent(inout) :: v
+      real(kind = RPRE), dimension(:,:), intent(in) :: A
+      integer(kind = IPRE), dimension(:), intent(in) :: idx
+      integer(kind = IPRE) :: i, n, c
+      real(kind = RPRE) :: eta
+
+      n = size(A, 1)
+      do i = 1, n
+        c = idx(i)
+        v(c) = v(c) + 1
+        eta = 1.0d0 / real(v(c), RPRE)
+        means(c,:) = ( 1.0d0 - eta ) * means(c,:) + eta * A(i,:)
+      end do
+      return
+    end subroutine update_means
+
+    !-------------------------------------------------------------------
+    ! means_residuals
+    !-------------------------------------------------------------------
+    function means_residuals(means1, means2) result(eps)
+      real(kind = RPRE) :: eps
+      real(kind = RPRE), dimension(:,:), intent(in) :: means1, means2
+      real(kind = RPRE), dimension(:,:), allocatable :: means
+      integer(kind = IPRE) :: k
+
+      eps = 0.0d0
+      means = abs( means2 - means1 )
+      do k = 1, p
+        eps = eps + sum(means(:,k))**2
+      end do
+      eps = sqrt(eps)
+      return
+    end function means_residuals
+
+  end function mbkmeans2
 
 !=======================================================================
 ! mean
@@ -6762,6 +7448,107 @@ contains
     end do
     return
   end function signum2
+
+!=======================================================================
+! silhouette
+!-----------------------------------------------------------------------
+! silhouette computes the silhouette values for every observations given
+! the clustering indices.
+!
+! Syntax
+!-----------------------------------------------------------------------
+! s = silhouette(x, cluster)
+! s = silhouette(X, cluster)
+!
+! Description
+!-----------------------------------------------------------------------
+! s = silhouette(x, cluster) returns the silhouette values for every
+! elements in the vector x.
+!
+! s = silhouette(X, cluster) returns the silhouette values for every
+! elements in the array X, each row being an observation and each
+! column a parameter.
+!
+! Notes
+!-----------------------------------------------------------------------
+! After Rousseeuw P. J. (1986): "Silhouettes: a graphical aid to the
+! interpretation and validation of cluster analysis".
+!=======================================================================
+
+  function silhouette1(x, cluster) result(s)
+    real(kind = RPRE), dimension(:), allocatable :: s
+    real(kind = RPRE), dimension(:), intent(in) :: x
+    integer(kind = IPRE), dimension(:), intent(in) :: cluster
+    integer(kind = IPRE) :: n
+    real(kind = RPRE), dimension(:,:), allocatable :: A
+
+    n = size(x)
+    A = reshape( x, shape = [ n, 1 ], order = [ 1, 2 ] )
+    s = silhouette2(A, cluster)
+    return
+  end function silhouette1
+
+  function silhouette2(X, cluster) result(s)
+    real(kind = RPRE), dimension(:), allocatable :: s
+    real(kind = RPRE), dimension(:,:), intent(in) :: X
+    integer(kind = IPRE), dimension(:), intent(in) :: cluster
+    integer(kind = IPRE) :: i, j, K, l, n
+    real(kind = RPRE) :: a, b
+    integer(kind = IPRE), dimension(:), allocatable :: idx, cs
+    real(kind = RPRE), dimension(:), allocatable :: d
+
+    n = size(X, 1)
+    K = maxval(cluster)
+    if ( K .eq. 1 ) then
+      print *, "Warning: in silhouette, the silhouette value cannot " &
+        // "be defined for K = 1."
+      s = zeros(n)
+      return
+    end if
+
+    ! Size of each cluster
+    !======================
+    allocate(cs(K))
+    do j = 1, K
+      idx = find( cluster .eq. j )    ! All objects in cluster j
+      cs(j) = size(idx)
+    end do
+
+    ! Loop over objects
+    !===================
+    s = zeros(n)
+    do i = 1, n
+
+      ! Compute the dissimilarity for each cluster to current object i
+      !================================================================
+      d = zeros(K)          ! Cluster dissimilarity to object i
+      do j = 1, K
+        idx = find( cluster .eq. j )
+        d(j) = sum( ( X(idx,:) - repmat(X(i,:), cs(j), 2) )**2 ) / cs(j)
+      end do
+
+      ! Compute a(i)
+      !==============
+      j = cluster(i)
+      if ( cs(j) .eq. 1 ) then
+        s(i) = 0.0d0
+        cycle               ! Skip next statements and begin next iteration
+      else
+        a = d(j) * cs(j) / ( cs(j) - 1 )
+      end if
+
+      ! Compute b(i)
+      !==============
+      b = minval(d, mask = d .ne. d(j) .and. d .ne. real(0., RPRE))
+
+      ! Compute s(i)
+      !==============
+      s(i) = (b - a) / max(a, b)
+
+    end do
+
+    return
+  end function silhouette2
 
 !=======================================================================
 ! sinc
