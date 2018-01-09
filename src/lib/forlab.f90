@@ -28,7 +28,7 @@ module forlab
 !=======================================================================
 
   integer, public, parameter :: IPRE = 4
-  integer, public, parameter :: RPRE = 4
+  integer, public, parameter :: RPRE = 8
   integer, public, parameter :: CLEN = 512
   real(kind = 8), public, parameter :: pi = 3.141592653589793238460d0
   real(kind = 8), public, save :: tic_time
