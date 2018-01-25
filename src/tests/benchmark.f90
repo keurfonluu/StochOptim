@@ -126,13 +126,13 @@ contains
     func = "sphere"
     n_dim = 2
     popsize = 16
-    w = 0.72
-    c1 = 1.49
-    c2 = 1.49
+    w = 0.7298
+    c1 = 1.49618
+    c2 = 1.49618
     gamma = 1.
     F = 0.5
     CR = 0.1
-    sigma = 1.
+    sigma = 0.5
     mu_perc = 0.5
     max_iter = 200
     max_run = 100

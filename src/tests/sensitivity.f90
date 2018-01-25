@@ -142,12 +142,12 @@ contains
     func = "sphere"
     n_dim = 2
     popfactor = 5
-    w = 0.72
-    c = 1.49
+    w = 0.7298
+    c = 1.49618
     gamma = 1.
     F = 0.5
     CR = 0.1
-    sigma = 1.
+    sigma = 0.5
     mu_perc = 0.5
     max_iter = 200
     seed = -1

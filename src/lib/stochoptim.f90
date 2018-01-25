@@ -35,7 +35,7 @@ module stochoptim
   type EvolutionaryKeywords
     integer(kind = IPRE) :: popsize = 10, max_iter = 100, verbose = 0
     real(kind = RPRE) :: eps1 = 1d-8, eps2 = 1d-8, w = 0.7298, c1 = 1.49618, &
-      c2 = 1.49618, gamma = 1., F = 0.5, CR = 0.1, sigma = 1., mu_perc = 0.5
+      c2 = 1.49618, gamma = 1., F = 0.5, CR = 0.1, sigma = 0.5, mu_perc = 0.5
     logical :: constrain = .true., snap = .false.
     character(len = 5) :: solver, strategy
   contains
@@ -73,10 +73,12 @@ module stochoptim
     integer(kind = IPRE) :: mpi_rank = 0, mpi_size = 1, mpi_ierr
   contains
     procedure, private, pass :: print_Evolutionary_parameters, print_Evolutionary_result, &
-      print_Evolutionary, flag, unstandardize1_evolutionary, unstandardize2_evolutionary, &
-      init_models_evolutionary, eval_models, constrain_de, constrain_cpso, de_mutation, &
-      de, cpso, cmaes, save_models_evolutionary
+      print_Evolutionary, flag, standardize1_evolutionary, standardize2_evolutionary, &
+      unstandardize1_evolutionary, unstandardize2_evolutionary, init_models_evolutionary, &
+      eval_models, constrain_de, constrain_cpso, de_mutation, de, cpso, cmaes, &
+      save_models_evolutionary
     generic, private :: init_models => init_models_evolutionary
+    generic, private :: standardize => standardize1_evolutionary, standardize2_evolutionary
     generic, private :: unstandardize => unstandardize1_evolutionary, unstandardize2_evolutionary
     generic, public :: print_parameters => print_Evolutionary_parameters
     generic, public :: print_result => print_Evolutionary_result
@@ -492,13 +494,15 @@ contains
     return
   end function flag
 
-  subroutine optimize(self, solver, w, c1, c2, gamma, &
+  subroutine optimize(self, solver, xstart, w, c1, c2, gamma, &
                       F, CR, strategy, sigma, mu_perc)
     class(Evolutionary), intent(inout) :: self
     character(len = *), intent(in), optional :: solver, strategy
     real(kind = RPRE), intent(in), optional :: w, c1, c2, gamma, F, CR, sigma, mu_perc
-    real(kind = RPRE) :: opt_w = 0.72, opt_c1 = 1.49, opt_c2 = 1.49, opt_gamma = 1., &
-      opt_F = 0.5, opt_CR = 0.1, opt_sigma = 1., opt_mu_perc = 0.5
+    real(kind = RPRE), dimension(:,:), intent(in), optional :: xstart
+    real(kind = RPRE) :: opt_w = 0.7298, opt_c1 = 1.49618, opt_c2 = 1.49618, opt_gamma = 1., &
+      opt_F = 0.5, opt_CR = 0.1, opt_sigma = 0.5, opt_mu_perc = 0.5
+    real(kind = RPRE), dimension(:,:), allocatable :: opt_xstart
     character(len = :), allocatable :: opt_solver, opt_strategy
     integer(kind = 4) :: master = 0, num_procs, rank, ierr
 
@@ -513,6 +517,28 @@ contains
       end if
     else
       opt_solver = "cpso"
+    end if
+    if ( present(xstart) ) then
+      select case(opt_solver)
+      case("cmaes")
+        if ( size(xstart, 1) .ne. 1 &
+          .or. size(xstart, 2) .ne. self % n_dim ) then
+          print *, "Error: xstart must be of shape [ 1, " // num2str(self % n_dim) &
+            // " ] for '" // opt_solver // "'"
+          stop
+        else
+          opt_xstart = xstart
+        end if
+      case default
+        if ( size(xstart, 1) .ne. self % popsize &
+          .or. size(xstart, 2) .ne. self % n_dim ) then
+          print *, "Error: xstart must be of shape [ " // num2str(self % popsize) &
+            // ", " // num2str(self % n_dim) // " ] for '" // opt_solver // "'"
+          stop
+        else
+          opt_xstart = xstart
+        end if
+      end select
     end if
     if ( present(w) ) then
       if ( w .lt. 0. .or. w .gt. 1. ) then
@@ -628,25 +654,42 @@ contains
       self % w = opt_w
       self % c1 = opt_c1
       self % c2 = opt_c2
-      call self % cpso(w = opt_w, c1 = opt_c1, c2 = opt_c2, gamma = real(0., RPRE))
+      call self % cpso(w = opt_w, c1 = opt_c1, c2 = opt_c2, gamma = real(0., RPRE), xstart = opt_xstart)
     case("cpso")
       self % w = opt_w
       self % c1 = opt_c1
       self % c2 = opt_c2
       self % gamma = opt_gamma
-      call self % cpso(w = opt_w, c1 = opt_c1, c2 = opt_c2, gamma = opt_gamma)
+      call self % cpso(w = opt_w, c1 = opt_c1, c2 = opt_c2, gamma = opt_gamma, xstart = opt_xstart)
     case("de")
       self % CR = opt_CR
       self % F = opt_F
       self % strategy = opt_strategy
-      call self % de(CR = opt_CR, F = opt_F, strategy = opt_strategy)
+      call self % de(CR = opt_CR, F = opt_F, strategy = opt_strategy, xstart = opt_xstart)
     case("cmaes")
       self % sigma = opt_sigma
       self % mu_perc = opt_mu_perc
-      call self % cmaes(sigma = opt_sigma, mu_perc = opt_mu_perc)
+      call self % cmaes(sigma = opt_sigma, mu_perc = opt_mu_perc, xstart = opt_xstart)
     end select
     return
   end subroutine optimize
+
+  function standardize1_evolutionary(self, models) result(out)
+    real(kind = RPRE), dimension(:), allocatable :: out
+    class(Evolutionary), intent(inout) :: self
+    real(kind = RPRE), dimension(:), intent(in) :: models
+    out = ( models - self % mu_scale ) / self % std_scale
+    return
+  end function standardize1_evolutionary
+
+  function standardize2_evolutionary(self, models) result(out)
+    real(kind = RPRE), dimension(:,:), allocatable :: out
+    class(Evolutionary), intent(inout) :: self
+    real(kind = RPRE), dimension(:,:), intent(in) :: models
+    out = ( models - spread(self % mu_scale, 1, self % popsize) ) &
+          / spread(self % std_scale, 1, self % popsize)
+    return
+  end function standardize2_evolutionary
 
   function unstandardize1_evolutionary(self, models) result(out)
     real(kind = RPRE), dimension(:), allocatable :: out
@@ -795,10 +838,11 @@ contains
     end function make_idx
   end function de_mutation
 
-  subroutine de(self, CR, F, strategy)
+  subroutine de(self, CR, F, strategy, xstart)
     class(Evolutionary), intent(inout) :: self
     real(kind = RPRE), intent(in) :: CR, F
     character(len = *), intent(in) :: strategy
+    real(kind = RPRE), dimension(:,:), allocatable, intent(in) :: xstart
     integer(kind = IPRE) :: i, it, gbidx
     integer(kind = IPRE), dimension(:), allocatable :: irand
     real(kind = RPRE) :: gfit
@@ -812,7 +856,11 @@ contains
     if ( self % verbose .eq. 1 ) call progress_perc(0, self % max_iter, " Processing: ")
 
     ! Population initial positions
-    X = 2. * randu(self % popsize, self % n_dim) - 1.
+    if ( allocated(xstart) ) then
+      X = self % standardize(xstart)
+    else
+      X = 2. * randu(self % popsize, self % n_dim) - 1.
+    end if
 
     ! Compute fitness
     pfit = self % eval_models(X)
@@ -895,6 +943,8 @@ contains
         self % models(:,:,it) = self % unstandardize(X)
         self % energy(:,it) = pfit
       end if
+
+      if ( self % verbose .eq. 1 ) call progress_perc(it, self % max_iter, " Processing: ")
     end do
 
     self % xopt = xopt
@@ -911,9 +961,10 @@ contains
     return
   end subroutine de
 
-  subroutine cpso(self, w, c1, c2, gamma)
+  subroutine cpso(self, w, c1, c2, gamma, xstart)
     class(Evolutionary), intent(inout) :: self
     real(kind = RPRE), intent(in) :: w, c1, c2, gamma
+    real(kind = RPRE), dimension(:,:), allocatable, intent(in) :: xstart
     integer(kind = IPRE) :: i, it, gbidx, nw
     integer(kind = IPRE), dimension(:), allocatable :: idx
     real(kind = RPRE) :: gfit, delta, inorm, swarm_radius
@@ -926,7 +977,11 @@ contains
     if ( self % verbose .eq. 1 ) call progress_perc(0, self % max_iter, " Processing: ")
 
     ! Particles initial positions
-    X = 2. * randu(self % popsize, self % n_dim) - 1.
+    if ( allocated(xstart) ) then
+      X = self % standardize(xstart)
+    else
+      X = 2. * randu(self % popsize, self % n_dim) - 1.
+    end if
     pbest = X
 
     ! Initialize particle velocity
@@ -1053,9 +1108,10 @@ contains
     return
   end subroutine cpso
 
-  subroutine cmaes(self, sigma, mu_perc)
+  subroutine cmaes(self, sigma, mu_perc, xstart)
     class(Evolutionary), intent(inout) :: self
     real(kind = RPRE), intent(in) :: sigma, mu_perc
+    real(kind = RPRE), dimension(:,:), allocatable, intent(in) :: xstart
     integer(kind = IPRE) :: i, k, it, mu, eigeneval, ilim
     real(kind = RPRE) :: mueff, cc, cs, c1, cmu, damps, chind, hsig, perc(2), &
       delta, insigma
@@ -1074,7 +1130,11 @@ contains
     end if
 
     ! Population initial positions
-    xmean = 2. * randu(self % n_dim) - 1.
+    if ( allocated(xstart) ) then
+      xmean = self % standardize([ xstart ])
+    else
+      xmean = 2. * randu(self % n_dim) - 1.
+    end if
     allocate(xold(self % n_dim))
 
     ! Number of parents

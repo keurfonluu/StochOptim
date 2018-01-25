@@ -151,7 +151,7 @@ $(TEST): $(OBJST)
 	$(COMPILE) -o $@ $(OBJST)
 
 # Utilities
-.PHONY: $(ALL) test clean veryclean
+.PHONY: optimization benchmark sampling sensitivity test clean veryclean
 
 clean:
 	rm -rf $(ALL) $(TEST) $(OBJDIR)

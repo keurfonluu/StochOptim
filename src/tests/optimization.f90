@@ -96,7 +96,7 @@ contains
     F = 0.5
     CR = 0.1
     strategy = "rand1"
-    sigma = 1.
+    sigma = 0.5
     mu_perc = 0.5
     max_iter = 200
     seed = -1
