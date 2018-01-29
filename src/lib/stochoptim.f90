@@ -678,7 +678,12 @@ contains
     real(kind = RPRE), dimension(:), allocatable :: out
     class(Evolutionary), intent(inout) :: self
     real(kind = RPRE), dimension(:), intent(in) :: models
-    out = ( models - self % mu_scale ) / self % std_scale
+    real(kind = RPRE), dimension(:), allocatable :: std_scale
+    logical, dimension(:), allocatable :: mask
+
+    mask = self % std_scale .ne. 0.
+    std_scale = merge(self % std_scale, real(1., RPRE), mask)
+    out = ( models - self % mu_scale ) / std_scale
     return
   end function standardize1_evolutionary
 
@@ -686,8 +691,13 @@ contains
     real(kind = RPRE), dimension(:,:), allocatable :: out
     class(Evolutionary), intent(inout) :: self
     real(kind = RPRE), dimension(:,:), intent(in) :: models
+    real(kind = RPRE), dimension(:), allocatable :: std_scale
+    logical, dimension(:), allocatable :: mask
+
+    mask = self % std_scale .ne. 0.
+    std_scale = merge(self % std_scale, real(1., RPRE), mask)
     out = ( models - spread(self % mu_scale, 1, self % popsize) ) &
-          / spread(self % std_scale, 1, self % popsize)
+          / spread(std_scale, 1, self % popsize)
     return
   end function standardize2_evolutionary
 
@@ -1084,7 +1094,9 @@ contains
             idx = argsort(pbestfit, 2)
             idx = idx(:nw)
             V(idx,:) = 0.
-            X(idx,:) = 2. * randu(nw, self % n_dim) - 1.
+            do i = 1, nw
+              X(idx(i),:) = merge(2.*randu(self % n_dim)-1., real(0., RPRE), self % std_scale .ne. 0.)
+            end do
             pbest(idx,:) = X(idx,:)
             pbestfit(idx) = 1e30
           end if
@@ -1476,7 +1488,10 @@ contains
     real(kind = RPRE), dimension(:), allocatable :: out
     class(MonteCarlo), intent(inout) :: self
     real(kind = RPRE), dimension(:), intent(in) :: models
-    out = ( models - self % mu_scale ) / self % std_scale
+    real(kind = RPRE), dimension(:), allocatable :: std_scale
+    logical, dimension(:), allocatable :: mask
+
+    out = ( models - self % mu_scale ) / std_scale
     return
   end function standardize_montecarlo
 
