@@ -67,7 +67,7 @@ module stochoptim
     integer(kind = IPRE) :: iflag, n_iter, n_eval, n_restart
     real(kind = RPRE), dimension(:,:,:), allocatable :: models
     real(kind = RPRE), dimension(:,:), allocatable :: energy, means
-    real(kind = RPRE), dimension(:), allocatable :: mu_scale, std_scale
+    real(kind = RPRE), dimension(:), allocatable :: fitness, mu_scale, std_scale
     real(kind = RPRE) :: w, c1, c2, gamma, F, CR, sigma, mu_perc
 
     integer(kind = IPRE) :: mpi_rank = 0, mpi_size = 1, mpi_ierr
@@ -723,9 +723,11 @@ contains
     if ( .not. allocated(self % models) ) then
       allocate(self % models(self % popsize, self % n_dim, self % max_iter))
       allocate(self % energy(self % popsize, self % max_iter))
+      allocate(self % fitness(self % max_iter))
     else
       self % models = 0.
       self % energy = 0.
+      self % fitness = 0.
     end if
     return
   end subroutine init_models_evolutionary
@@ -878,16 +880,17 @@ contains
     self % n_eval = self % popsize
     if ( self % verbose .eq. 1 ) call progress_perc(1, self % max_iter, " Processing: ")
 
-    if ( self % snap ) then
-      call self % init_models()
-      self % models(:,:,1) = self % unstandardize(X)
-      self % energy(:,1) = pbestfit
-    end if
-
     ! Initialize best individual
     gbidx = minloc(pbestfit, dim = 1)
     gfit = pbestfit(gbidx)
     gbest = X(gbidx,:)
+
+    if ( self % snap ) then
+      call self % init_models()
+      self % models(:,:,1) = self % unstandardize(X)
+      self % energy(:,1) = pbestfit
+      self % fitness(1) = gfit
+    end if
 
     ! Iterate until one of the termination criterion is satisfied
     it = 1
@@ -952,6 +955,7 @@ contains
       if ( self % snap ) then
         self % models(:,:,it) = self % unstandardize(X)
         self % energy(:,it) = pfit
+        self % fitness(it) = gfit
       end if
 
       if ( self % verbose .eq. 1 ) call progress_perc(it, self % max_iter, " Processing: ")
@@ -963,6 +967,7 @@ contains
     if ( self % snap ) then
       self % models = self % models(:,:,:it)
       self % energy = self % energy(:,:it)
+      self % fitness = self % fitness(:it)
     end if
     if ( self % verbose .eq. 1 ) then
       call progress_perc(self % max_iter, self % max_iter, " Processing: ")
@@ -1004,16 +1009,17 @@ contains
     self % n_eval = self % popsize
     if ( self % verbose .eq. 1 ) call progress_perc(1, self % max_iter, " Processing: ")
 
-    if ( self % snap ) then
-      call self % init_models()
-      self % models(:,:,1) = self % unstandardize(X)
-      self % energy(:,1) = pbestfit
-    end if
-
     ! Initialize best individual
     gbidx = minloc(pbestfit, dim = 1)
     gfit = pbestfit(gbidx)
     gbest = X(gbidx,:)
+
+    if ( self % snap ) then
+      call self % init_models()
+      self % models(:,:,1) = self % unstandardize(X)
+      self % energy(:,1) = pbestfit
+      self % fitness(1) = gfit
+    end if
 
     ! Swarm maximum radius
     delta = log(1. + 0.003 * self % popsize) / max(0.2, log(0.01*real(self % max_iter)))
@@ -1076,6 +1082,7 @@ contains
       if ( self % snap ) then
         self % models(:,:,it) = self % unstandardize(X)
         self % energy(:,it) = pfit
+        self % fitness(it) = gfit
       end if
 
       ! Competitive PSO algorithm
@@ -1112,6 +1119,7 @@ contains
     if ( self % snap ) then
       self % models = self % models(:,:,:it)
       self % energy = self % energy(:,:it)
+      self % fitness = self % fitness(:it)
     end if
     if ( self % verbose .eq. 1 ) then
       call progress_perc(self % max_iter, self % max_iter, " Processing: ")
@@ -1260,6 +1268,7 @@ contains
       if ( self % snap ) then
         self % models(:,:,it) = self % unstandardize(arx)
         self % energy(:,it) = arfitness
+        self % fitness(it) = minval(arfitness)
         self % means(it,:) = self % unstandardize(xmean)
       end if
 
@@ -1384,6 +1393,7 @@ contains
     if ( self % snap ) then
       self % models = self % models(:,:,:it)
       self % energy = self % energy(:,:it)
+      self % fitness = self % fitness(:it)
       self % means = self % means(:it,:)
     end if
     if ( self % verbose .eq. 1 ) then
@@ -1397,7 +1407,7 @@ contains
     class(Evolutionary), intent(inout) :: self
     character(len = *), intent(in), optional :: prefix
     character(len = :), allocatable :: opt_prefix, str_popsize, str_n_dim, &
-      str_n_iter, models_filename, energy_filename, means_filename
+      str_n_iter, models_filename, energy_filename, fitness_filename, means_filename
 
     if ( self % mpi_rank .eq. 0 ) then
       if ( present(prefix) ) then
@@ -1413,8 +1423,10 @@ contains
         models_filename = "models_" // str_popsize // "_" // str_n_dim &
                           // "_" // str_n_iter // ".bin"
         energy_filename = "energy_" // str_popsize // "_" // str_n_iter // ".bin"
+        fitness_filename = "fitness_" // str_n_iter // ".bin"
         call savebin(opt_prefix // models_filename, self % models)
         call savebin(opt_prefix // energy_filename, self % energy)
+        call savebin(opt_prefix // fitness_filename, self % fitness)
         if ( self % solver .eq. "cmaes" ) then
           means_filename = "means_" // str_n_iter // "_" // str_n_dim // ".bin"
           call savebin(opt_prefix // means_filename, self % means)
